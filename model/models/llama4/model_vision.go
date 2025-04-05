@@ -109,9 +109,9 @@ type VisionModelOptions struct {
 	hiddenSize, numHeads, headDim int
 	imageSize, patchSize          int
 
-	pixelShuffleRatio float32
 	ropeTheta         float32
 	eps               float32
+	pixelShuffleRatio float32
 }
 
 type VisionModel struct {
@@ -133,9 +133,13 @@ func newVisionModel(c fs.Config) *VisionModel {
 	return &VisionModel{
 		Layers: make([]VisionLayer, c.Uint("vision.block_count")),
 		VisionModelOptions: &VisionModelOptions{
-			hiddenSize: int(c.Uint("vision.embedding_length")),
-			numHeads:   int(c.Uint("vision.attention.head_count")),
-			eps:        c.Float("vision.layer_norm_rms_epsilon"),
+			hiddenSize:        int(c.Uint("vision.embedding_length")),
+			numHeads:          int(c.Uint("vision.attention.head_count")),
+			imageSize:         int(c.Uint("vision.image_size")),
+			patchSize:         int(c.Uint("vision.patch_size")),
+			ropeTheta:         float32(c.Float("vision.rope.freq_base")),
+			eps:               c.Float("vision.layer_norm_epsilon"),
+			pixelShuffleRatio: float32(c.Float("vision.pixel_shuffle_ratio")),
 		},
 	}
 }

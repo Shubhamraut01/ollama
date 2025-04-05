@@ -54,12 +54,6 @@ type TextExperts struct {
 }
 
 func (e *TextExperts) Forward(ctx ml.Context, hiddenStates ml.Tensor, opts *TextModelOptions) ml.Tensor {
-	// hidden_states = hidden_states.view(self.num_experts, -1, self.hidden_size)
-	// gate_up = torch.matmul(hidden_states, self.gate_up_proj)
-	// gate, up = gate_up.chunk(2, dim=-1)  # not supported for DTensors
-	// next_states = torch.matmul((up * self.act_fn(gate)), self.down_proj)
-	// next_states = next_states.view(-1, self.hidden_size)
-
 	hiddenStates = hiddenStates.Reshape(ctx, opts.hiddenSize, hiddenStates.Dim(1)*hiddenStates.Dim(2), opts.numExperts)
 	gateUp := e.GateUp.Forward(ctx, hiddenStates)
 
@@ -124,12 +118,12 @@ type TextMLPLayer struct {
 	MLP     *TextMLP
 }
 
-func (d *TextMLPLayer) Forward(ctx ml.Context, hiddenStates, outputs ml.Tensor, cache kvcache.Cache, opts *TextModelOptions) ml.Tensor {
+func (d *TextMLPLayer) Forward(ctx ml.Context, hiddenStates, positions, outputs ml.Tensor, cache kvcache.Cache, opts *TextModelOptions) ml.Tensor {
 	residual := hiddenStates
 
 	// self attention
 	hiddenStates = d.AttentionNorm.Forward(ctx, hiddenStates, opts.eps)
-	hiddenStates = d.Attention.Forward(ctx, hiddenStates, cache, opts)
+	hiddenStates = d.Attention.Forward(ctx, hiddenStates, positions, cache, opts)
 
 	if outputs != nil {
 		hiddenStates = hiddenStates.Rows(ctx, outputs)
@@ -146,16 +140,17 @@ func (d *TextMLPLayer) Forward(ctx ml.Context, hiddenStates, outputs ml.Tensor, 
 }
 
 type TextLayer interface {
-	Forward(ctx ml.Context, hiddenStates, outputs ml.Tensor, cache kvcache.Cache, opts *TextModelOptions) ml.Tensor
+	Forward(ctx ml.Context, hiddenStates, positions, outputs ml.Tensor, cache kvcache.Cache, opts *TextModelOptions) ml.Tensor
 }
 
 type TextModelOptions struct {
-	hiddenSize, numHeads, numExperts int
-	ropeDim                          int
-	ropeBase, ropeScale              float32
-	eps                              float32
-	interleaveLayerStep              int
-	topK                             int
+	hiddenSize, numHeads       int
+	numExperts, numExpertsUsed int
+	ropeDim                    int
+	ropeBase, ropeScale        float32
+	eps                        float32
+	interleaveLayerStep        int
+	topK                       int
 }
 
 type TextModel struct {
@@ -184,7 +179,8 @@ func newTextModel(c fs.Config) *TextModel {
 		TextModelOptions: &TextModelOptions{
 			hiddenSize:          int(c.Uint("embedding_length")),
 			numHeads:            int(c.Uint("attention.head_count")),
-			numExperts:          int(c.Uint("moe.expert_count")),
+			numExperts:          int(c.Uint("expert_count")),
+			numExpertsUsed:      int(c.Uint("expert_used_count")),
 			ropeDim:             int(c.Uint("rope.dimension_count")),
 			ropeBase:            c.Float("rope.freq_base"),
 			ropeScale:           c.Float("rope.freq_scale", 1),
@@ -198,7 +194,7 @@ func (m *TextModel) Forward(ctx ml.Context, inputs, positions, outputs ml.Tensor
 	hiddenStates := m.TokenEmbedding.Forward(ctx, inputs)
 
 	for _, layer := range m.Layers {
-		hiddenStates = layer.Forward(ctx, hiddenStates, outputs, cache, m.TextModelOptions)
+		hiddenStates = layer.Forward(ctx, hiddenStates, positions, outputs, cache, m.TextModelOptions)
 	}
 
 	hiddenStates = m.OutputNorm.Forward(ctx, hiddenStates, m.eps)
